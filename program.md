@@ -31,9 +31,37 @@ Higher is better. Range: 0.0 to 1.0.
 
 ## Evaluation
 
-Run:
+### Sequential (simple, slower ~5-8min)
 ```bash
-python eval.py
+python3 eval.py
+```
+
+### Parallel via subagents (fast, ~1-2min)
+Use Claude Code's Agent tool to run 5 batches simultaneously:
+
+1. **Create tasks** for tracking (TaskCreate for each batch 1-5)
+2. **Spawn 5 subagents in parallel** — each runs one batch:
+   ```bash
+   python3 eval.py --batch 1 --json   # cases: feature_request, bug_report
+   python3 eval.py --batch 2 --json   # cases: architecture_decision, vague_request
+   python3 eval.py --batch 3 --json   # cases: prioritization, debugging_help
+   python3 eval.py --batch 4 --json   # cases: quick_question, strategy
+   python3 eval.py --batch 5 --json   # cases: code_review, onboarding
+   ```
+   Each subagent: run its batch, results auto-save to `batch_results/batch_N.json`
+3. **Mark tasks completed** as each subagent finishes (TaskUpdate)
+4. **Merge results** after all 5 complete:
+   ```bash
+   python3 eval.py --merge
+   ```
+
+### Subagent prompt template
+When spawning each eval subagent:
+```
+Run eval batch N for the autoresearch project.
+Execute: python3 eval.py --batch N --json
+Working directory: /path/to/autoresearch-reefagent
+Report the pass_rate from the output when done.
 ```
 
 Extract the key metric from stdout:
@@ -65,12 +93,15 @@ Each response is judged on:
 2. Form a hypothesis for improvement (e.g., "adding decision framework will improve actionable score")
 3. Modify `prompt.md` with ONE focused change
 4. `git commit -am "experiment: <description>"`
-5. Run: `python eval.py`
-6. Extract `pass_rate` from output
-7. Record in `results.tsv`: `<commit>	<pass_rate>	<word_count>	<status>	<description>`
-8. If pass_rate improved (higher): **KEEP** — this becomes the new baseline
-9. If pass_rate equal or worse: **REVERT** — `git reset --hard HEAD~1`
-10. **GOTO 1**
+5. Run eval — use **parallel mode** for speed:
+   a. Create 5 tasks (TaskCreate) for tracking batches
+   b. Spawn 5 subagents in parallel, each runs `python3 eval.py --batch N --json`
+   c. Mark tasks completed as subagents finish (TaskUpdate)
+   d. Merge: `python3 eval.py --merge` → extracts `pass_rate`
+6. Record in `results.tsv`: `<commit>	<pass_rate>	<word_count>	<status>	<description>`
+7. If pass_rate improved (higher): **KEEP** — this becomes the new baseline
+8. If pass_rate equal or worse: **REVERT** — `git reset --hard HEAD~1`
+9. **GOTO 1**
 
 ### Results format (results.tsv)
 ```

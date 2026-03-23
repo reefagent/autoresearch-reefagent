@@ -31,18 +31,33 @@ No Python dependencies needed beyond the standard library — eval.py calls the 
 
 ## Running the Evaluation
 
+### Sequential (all 10 cases, ~5-8min)
 ```bash
-# Quick run — prints pass_rate and breakdown
-python3 eval.py
-
-# Verbose — shows each response and every PASS/FAIL judgment
-python3 eval.py --verbose
-
-# JSON output — for programmatic parsing
-python3 eval.py --json
+python3 eval.py                 # Quick run — prints pass_rate and breakdown
+python3 eval.py --verbose       # Show each response + every PASS/FAIL judgment
+python3 eval.py --json          # JSON output for programmatic parsing
 ```
 
-**What happens:** The script fires 60 Claude CLI calls (10 agent responses + 50 judge calls). Takes ~5-8 minutes. Uses `haiku` model for speed/cost.
+### Parallel via subagents (5 batches, ~1-2min)
+When running inside Claude Code, use 5 subagents to run batches simultaneously:
+```bash
+# Each subagent runs one batch (2 cases each, 12 CLI calls)
+python3 eval.py --batch 1       # feature_request + bug_report
+python3 eval.py --batch 2       # architecture_decision + vague_request
+python3 eval.py --batch 3       # prioritization + debugging_help
+python3 eval.py --batch 4       # quick_question + strategy
+python3 eval.py --batch 5       # code_review + onboarding
+
+# After all 5 finish, merge results
+python3 eval.py --merge         # Combines batch_results/*.json → final score
+```
+
+You can also run specific cases by ID:
+```bash
+python3 eval.py --cases feature_request,bug_report --json
+```
+
+**What happens:** Each batch fires 12 Claude CLI calls (2 agent responses + 10 judge calls). 5 batches in parallel = ~60 calls completed in ~1-2 minutes instead of ~5-8. Uses `sonnet` model. Token usage and cost tracked per-case and total.
 
 **Expected output:**
 ```
@@ -129,6 +144,7 @@ autoresearch-reefagent/
   program.md          <- Strategy doc for the autonomous loop
   baseline.md         <- Original prompt for reference (immutable)
   results.tsv         <- Experiment audit trail
+  batch_results/      <- Temporary batch outputs (auto-created in parallel mode)
 ```
 
 | File | Role | Mutable? |
@@ -139,6 +155,7 @@ autoresearch-reefagent/
 | `program.md` | Strategy doc for the AI agent | NO |
 | `baseline.md` | Original prompt for reference | NO |
 | `results.tsv` | Experiment log | Auto-updated |
+| `batch_results/` | Parallel batch outputs | Auto-created, ephemeral |
 
 ## How the Pattern Works
 
@@ -151,7 +168,13 @@ Agent runs infinite loop:
   2. Form hypothesis for improvement
   3. Modify prompt.md (one focused change)
   4. git commit
-  5. python3 eval.py
+  5. Eval (parallel):
+     ├─ Subagent 1: eval.py --batch 1  (feature_request, bug_report)
+     ├─ Subagent 2: eval.py --batch 2  (architecture_decision, vague_request)
+     ├─ Subagent 3: eval.py --batch 3  (prioritization, debugging_help)
+     ├─ Subagent 4: eval.py --batch 4  (quick_question, strategy)
+     └─ Subagent 5: eval.py --batch 5  (code_review, onboarding)
+     → eval.py --merge → pass_rate
   6. If pass_rate improved -> KEEP
   7. If not -> git reset --hard HEAD~1
   8. Record in results.tsv
@@ -163,10 +186,10 @@ Git tracks all experiments (commit = checkpoint, reset = rollback)
 
 ## Cost Estimate
 
-Using `haiku` model for both agent and judge:
+Using `sonnet` model for both agent and judge (token tracking built-in):
 - ~60 CLI calls per eval run
-- ~$0.10-0.20 per eval run
-- Overnight (100 experiments): ~$10-20
+- Token usage reported per-case and total after each run
+- Use `--json` output to capture exact cost breakdown
 
 ## Extending
 
@@ -174,7 +197,7 @@ Using `haiku` model for both agent and judge:
 
 **Add criteria:** Edit the `CRITERIA` list in `eval.py` — add what matters for your use case.
 
-**Change models:** Edit `MODEL_AGENT` and `MODEL_JUDGE` in `eval.py`. Use `sonnet` for higher quality, `haiku` for speed.
+**Change models:** Edit `MODEL_AGENT` and `MODEL_JUDGE` in `eval.py`. Default is `sonnet`. Use `haiku` for faster/cheaper runs.
 
 **Optimize other agents:** Copy `prompt.md` from any agent in `reefagent/agents/*/IDENTITY.md` and run the same loop.
 
