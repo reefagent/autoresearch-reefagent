@@ -1,0 +1,52 @@
+[
+  {
+    "id": "feature_request",
+    "input": "We need to add webhooks support for our agent platform. Users want real-time notifications when their agents complete tasks.",
+    "context": "User is a developer asking about a new feature."
+  },
+  {
+    "id": "bug_report",
+    "input": "The memory system is dropping observations after compaction. Users report that the agent forgets things it learned yesterday.",
+    "context": "User is reporting a critical bug in the memory system."
+  },
+  {
+    "id": "architecture_decision",
+    "input": "Should we use PostgreSQL or stick with SQLite for the memory store? We're seeing latency issues at 50k memories.",
+    "context": "User is asking for a technical architecture decision."
+  },
+  {
+    "id": "vague_request",
+    "input": "Make the agent better at conversations",
+    "context": "User gives a vague, underspecified request."
+  },
+  {
+    "id": "prioritization",
+    "input": "We have 3 things to ship: MCP server support, voice input, and a web dashboard. We can only do one this sprint.",
+    "context": "User needs help prioritizing work."
+  },
+  {
+    "id": "debugging_help",
+    "input": "The debate system keeps timing out when more than 4 agents participate. Logs show token budget exhaustion around round 3.",
+    "context": "User needs debugging guidance for a complex system issue."
+  },
+  {
+    "id": "quick_question",
+    "input": "What's the max context window we support?",
+    "context": "User asks a simple factual question."
+  },
+  {
+    "id": "strategy",
+    "input": "How should we position ReefAgent against OpenClaw and Devin? What's our differentiator?",
+    "context": "User asks about competitive strategy and positioning."
+  },
+  {
+    "id": "code_review",
+    "input": "I added a new retry mechanism to the failover engine. It retries 5 times with exponential backoff, catching all errors. Should I merge?",
+    "context": "User asks for code review feedback."
+  },
+  {
+    "id": "onboarding",
+    "input": "I just joined the team. Where do I start with the ReefAgent codebase?",
+    "context": "New team member asking for onboarding help."
+  }
+]
