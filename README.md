@@ -1,54 +1,185 @@
 # autoresearch-reefagent
 
-Autonomous prompt optimization for ReefAgent using the Karpathy autoresearch pattern.
+Autonomous prompt optimization for [ReefAgent](https://github.com/reefagent/reefagent) using the [Karpathy autoresearch](https://github.com/karpathy/autoresearch) pattern.
 
-## How It Works
+**One mutable file. One scalar metric. Git as memory. Loop forever.**
 
-1. `prompt.md` is the ONLY mutable file — the agent's identity prompt
-2. `eval.py` scores it against 10 test cases x 5 binary criteria = 50 checks
-3. An AI agent modifies `prompt.md`, runs eval, keeps improvements, discards regressions
-4. Git tracks all experiments; `results.tsv` is the audit trail
+## What This Does
 
-## Quick Start
+An AI agent autonomously improves the ReefAgent identity prompt (`prompt.md`) by:
+1. Modifying the prompt with one focused change
+2. Evaluating it against 10 real scenarios x 5 binary criteria = 50 checks
+3. Keeping improvements, discarding regressions
+4. Recording everything in `results.tsv`
+5. Repeating forever until interrupted
+
+The eval uses Claude Code CLI (pre-authenticated) — no API keys needed.
+
+## Setup
 
 ```bash
-# Install dependency
-pip install anthropic
+# Clone
+git clone https://github.com/reefagent/autoresearch-reefagent.git
+cd autoresearch-reefagent
 
-# Set API key
-export ANTHROPIC_API_KEY=sk-...
-
-# Run baseline evaluation
-python eval.py
-
-# Run with details
-python eval.py --verbose
-
-# Start the autonomous loop (give this to Claude Code)
-# "Read program.md and kick off the autoresearch loop"
+# Requires Claude Code CLI installed and authenticated
+# https://docs.anthropic.com/en/docs/claude-code
+claude --version  # verify it works
 ```
 
-## The 5 Criteria
+No Python dependencies needed beyond the standard library — eval.py calls the `claude` CLI directly via subprocess.
+
+## Running the Evaluation
+
+```bash
+# Quick run — prints pass_rate and breakdown
+python3 eval.py
+
+# Verbose — shows each response and every PASS/FAIL judgment
+python3 eval.py --verbose
+
+# JSON output — for programmatic parsing
+python3 eval.py --json
+```
+
+**What happens:** The script fires 60 Claude CLI calls (10 agent responses + 50 judge calls). Takes ~5-8 minutes. Uses `haiku` model for speed/cost.
+
+**Expected output:**
+```
+============================================================
+AUTORESEARCH EVAL RESULTS
+============================================================
+Timestamp:  2026-03-23T17:05:00
+Agent:      haiku
+Judge:      haiku
+Cases:      10
+Criteria:   5
+Total:      42/50
+
+pass_rate: 0.84
+
+Per-criterion breakdown:
+  actionable       9/10 ( 90%) [##################..]
+  concise          7/10 ( 70%) [##############......]
+  persona          9/10 ( 90%) [##################..]
+  no_hedging       8/10 ( 80%) [################....]
+  ships_fast       9/10 ( 90%) [##################..]
+```
+
+## Running the Autonomous Loop
+
+Give this to Claude Code:
+
+```
+Read program.md and kick off the autoresearch loop
+```
+
+Or manually:
+
+```bash
+# Create experiment branch
+git checkout -b autoresearch/session-1
+
+# Run baseline
+python3 eval.py
+# Record baseline score in results.tsv
+
+# The agent then loops:
+# 1. Edit prompt.md (one change)
+# 2. git commit
+# 3. python3 eval.py
+# 4. If improved → keep. If not → git reset --hard HEAD~1
+# 5. Repeat forever
+```
+
+## The 5 Binary Criteria
+
+Every agent response is judged PASS/FAIL on each:
 
 | Criterion | What It Measures |
 |-----------|-----------------|
-| actionable | Concrete next steps, not vague advice |
-| concise | Under 250 words, no filler |
-| persona | Sharp cofounder energy, not generic AI |
-| no_hedging | No excessive caveats without specifics |
-| ships_fast | Prioritizes shipping over over-engineering |
+| **actionable** | Provides at least one concrete next step (not vague advice) |
+| **concise** | Under 250 words, no unnecessary preamble or filler |
+| **persona** | Sounds like a sharp technical cofounder, not a generic AI |
+| **no_hedging** | Avoids excessive caveats or "it depends" without specifics |
+| **ships_fast** | Prioritizes shipping and iteration over over-engineering |
 
-## Files
+## The 10 Test Scenarios
+
+| ID | Scenario | Tests |
+|----|----------|-------|
+| `feature_request` | User wants webhooks support | Planning, scoping |
+| `bug_report` | Memory system dropping observations | Debugging, urgency |
+| `architecture_decision` | PostgreSQL vs SQLite at scale | Technical judgment |
+| `vague_request` | "Make the agent better" | Clarification skill |
+| `prioritization` | Pick 1 of 3 features for this sprint | Decision-making |
+| `debugging_help` | Debate system timeout with 4+ agents | Deep technical |
+| `quick_question` | "What's the max context window?" | Brevity |
+| `strategy` | Competitive positioning vs OpenClaw/Devin | Strategic thinking |
+| `code_review` | Retry mechanism PR review | Code quality judgment |
+| `onboarding` | New team member orientation | Mentoring |
+
+## File Structure
+
+```
+autoresearch-reefagent/
+  prompt.md           <- THE ONE MUTABLE FILE (agent identity prompt)
+  eval.py             <- Evaluation harness (calls claude CLI)
+  eval_cases.json     <- 10 test scenarios
+  program.md          <- Strategy doc for the autonomous loop
+  baseline.md         <- Original prompt for reference (immutable)
+  results.tsv         <- Experiment audit trail
+```
 
 | File | Role | Mutable? |
 |------|------|----------|
-| `prompt.md` | The agent identity prompt being optimized | YES |
-| `eval.py` | Evaluation harness (10 cases x 5 criteria) | NO |
+| `prompt.md` | Agent identity prompt being optimized | **YES** (only this) |
+| `eval.py` | Evaluation harness | NO |
 | `eval_cases.json` | Test scenarios | NO |
 | `program.md` | Strategy doc for the AI agent | NO |
 | `baseline.md` | Original prompt for reference | NO |
 | `results.tsv` | Experiment log | Auto-updated |
 
+## How the Pattern Works
+
+```
+Human writes program.md (strategy doc)
+       |
+       v
+Agent runs infinite loop:
+  1. Read prompt.md + results.tsv
+  2. Form hypothesis for improvement
+  3. Modify prompt.md (one focused change)
+  4. git commit
+  5. python3 eval.py
+  6. If pass_rate improved -> KEEP
+  7. If not -> git reset --hard HEAD~1
+  8. Record in results.tsv
+  9. GOTO 1
+       |
+       v
+Git tracks all experiments (commit = checkpoint, reset = rollback)
+```
+
+## Cost Estimate
+
+Using `haiku` model for both agent and judge:
+- ~60 CLI calls per eval run
+- ~$0.10-0.20 per eval run
+- Overnight (100 experiments): ~$10-20
+
+## Extending
+
+**Add test cases:** Edit `eval_cases.json` — add scenarios your agent struggles with.
+
+**Add criteria:** Edit the `CRITERIA` list in `eval.py` — add what matters for your use case.
+
+**Change models:** Edit `MODEL_AGENT` and `MODEL_JUDGE` in `eval.py`. Use `sonnet` for higher quality, `haiku` for speed.
+
+**Optimize other agents:** Copy `prompt.md` from any agent in `reefagent/agents/*/IDENTITY.md` and run the same loop.
+
 ## Based On
 
-[Karpathy's autoresearch](https://github.com/karpathy/autoresearch) — the pattern of "one mutable file + one scalar metric + fixed eval + git as memory + loop forever."
+- [Karpathy's autoresearch](https://github.com/karpathy/autoresearch) — the original autonomous experiment loop
+- [ReefAgent](https://github.com/reefagent/reefagent) — the agent platform whose prompts we're optimizing
+- Research from 39 parallel agents exploring the autoresearch ecosystem (see `auto_learning.md` and `auto_discoveries.md` in [mac-mini-agent](https://github.com/reefagent/mac-mini-agent))

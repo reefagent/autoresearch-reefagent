@@ -3,34 +3,26 @@
 Autoresearch Prompt Evaluator for ReefAgent
 
 Evaluates prompt.md against 10 test cases using 5 binary criteria.
-Uses Claude as both the agent (with the prompt) and the judge.
+Uses Claude Code CLI (already authenticated) as both agent and judge.
 
 Usage:
-    python eval.py                  # Run eval, print results
-    python eval.py --json           # Output JSON for parsing
-    python eval.py --verbose        # Show each response + judgment
+    python3 eval.py                 # Run eval, print results
+    python3 eval.py --json          # Output JSON for parsing
+    python3 eval.py --verbose       # Show each response + judgment
 """
 
 import json
+import subprocess
 import sys
-import os
 import time
 from pathlib import Path
-
-try:
-    import anthropic
-except ImportError:
-    print("ERROR: pip install anthropic")
-    sys.exit(1)
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-MODEL_AGENT = "claude-sonnet-4-20250514"   # cheaper model for generating responses
-MODEL_JUDGE = "claude-sonnet-4-20250514"   # judge model for evaluation
-MAX_TOKENS_AGENT = 1024
-MAX_TOKENS_JUDGE = 512
+MODEL_AGENT = "haiku"    # fast + cheap for generating responses
+MODEL_JUDGE = "haiku"    # fast + cheap for judging (PASS/FAIL only)
 
 # Binary evaluation criteria (pass/fail)
 CRITERIA = [
@@ -57,6 +49,40 @@ CRITERIA = [
 ]
 
 # ---------------------------------------------------------------------------
+# Claude CLI wrapper
+# ---------------------------------------------------------------------------
+
+def claude_cli(prompt: str, system_prompt: str | None = None, model: str = "haiku") -> str:
+    """Call claude CLI in print mode. Returns the text response."""
+    cmd = [
+        "claude", "-p",
+        "--model", model,
+        "--output-format", "json",
+        "--no-session-persistence",
+    ]
+    if system_prompt:
+        cmd.extend(["--system-prompt", system_prompt])
+    cmd.append(prompt)
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(f"claude CLI failed: {result.stderr[:200]}")
+
+    try:
+        data = json.loads(result.stdout)
+        if data.get("is_error"):
+            raise RuntimeError(f"claude error: {data.get('result', 'unknown')}")
+        return data.get("result", "")
+    except json.JSONDecodeError:
+        return result.stdout.strip()
+
+# ---------------------------------------------------------------------------
 # Core functions
 # ---------------------------------------------------------------------------
 
@@ -70,19 +96,13 @@ def load_eval_cases() -> list[dict]:
     path = Path(__file__).parent / "eval_cases.json"
     return json.loads(path.read_text())
 
-def get_agent_response(client: anthropic.Anthropic, prompt: str, case: dict) -> str:
+def get_agent_response(prompt: str, case: dict) -> str:
     """Send a test case to the agent with the given system prompt."""
-    response = client.messages.create(
-        model=MODEL_AGENT,
-        max_tokens=MAX_TOKENS_AGENT,
-        system=prompt,
-        messages=[{"role": "user", "content": case["input"]}],
-    )
-    return response.content[0].text
+    return claude_cli(case["input"], system_prompt=prompt, model=MODEL_AGENT)
 
-def judge_response(client: anthropic.Anthropic, case: dict, response: str, criterion: dict) -> bool:
+def judge_response(case: dict, response: str, criterion: dict) -> bool:
     """Use Claude as judge to evaluate one criterion. Returns True = pass."""
-    judge_prompt = f"""You are an impartial evaluator. You will judge an AI agent's response against a specific criterion.
+    judge_prompt = f"""You are an impartial evaluator. Judge this AI agent response against one criterion.
 
 CONTEXT: {case['context']}
 USER INPUT: {case['input']}
@@ -94,23 +114,19 @@ CRITERION: {criterion['question']}
 
 Answer ONLY "PASS" or "FAIL". Nothing else."""
 
-    result = client.messages.create(
-        model=MODEL_JUDGE,
-        max_tokens=MAX_TOKENS_JUDGE,
-        messages=[{"role": "user", "content": judge_prompt}],
-    )
-    answer = result.content[0].text.strip().upper()
-    return "PASS" in answer
+    answer = claude_cli(judge_prompt, model=MODEL_JUDGE)
+    return "PASS" in answer.strip().upper()
 
 def run_eval(verbose: bool = False) -> dict:
     """Run the full evaluation. Returns results dict."""
-    client = anthropic.Anthropic()
     prompt = load_prompt()
     cases = load_eval_cases()
 
     results = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "prompt_file": "prompt.md",
+        "model_agent": MODEL_AGENT,
+        "model_judge": MODEL_JUDGE,
         "num_cases": len(cases),
         "num_criteria": len(CRITERIA),
         "cases": [],
@@ -127,16 +143,17 @@ def run_eval(verbose: bool = False) -> dict:
             print(f"Input: {case['input'][:80]}...")
 
         # Get agent response
-        response = get_agent_response(client, prompt, case)
+        response = get_agent_response(prompt, case)
 
         if verbose:
-            print(f"Response ({len(response.split())} words): {response[:200]}...")
+            print(f"Response ({len(response.split())} words):")
+            print(f"  {response[:300]}...")
 
         # Judge each criterion
         case_results = {"id": case["id"], "criteria": {}, "pass_count": 0}
 
         for criterion in CRITERIA:
-            passed = judge_response(client, case, response, criterion)
+            passed = judge_response(case, response, criterion)
             case_results["criteria"][criterion["id"]] = passed
             if passed:
                 case_results["pass_count"] += 1
@@ -146,12 +163,14 @@ def run_eval(verbose: bool = False) -> dict:
 
             if verbose:
                 status = "PASS" if passed else "FAIL"
-                print(f"  [{status}] {criterion['id']}: {criterion['question'][:60]}")
+                print(f"  [{status}] {criterion['id']}")
 
         results["cases"].append(case_results)
 
     # Compute final score
-    results["pass_rate"] = round(results["total_pass"] / results["total_checks"], 4) if results["total_checks"] > 0 else 0.0
+    results["pass_rate"] = round(
+        results["total_pass"] / results["total_checks"], 4
+    ) if results["total_checks"] > 0 else 0.0
 
     return results
 
@@ -161,6 +180,8 @@ def print_summary(results: dict):
     print(f"AUTORESEARCH EVAL RESULTS")
     print(f"{'='*60}")
     print(f"Timestamp:  {results['timestamp']}")
+    print(f"Agent:      {results['model_agent']}")
+    print(f"Judge:      {results['model_judge']}")
     print(f"Cases:      {results['num_cases']}")
     print(f"Criteria:   {results['num_criteria']}")
     print(f"Total:      {results['total_pass']}/{results['total_checks']}")
@@ -193,9 +214,10 @@ if __name__ == "__main__":
     verbose = "--verbose" in sys.argv or "-v" in sys.argv
     json_output = "--json" in sys.argv
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("ERROR: Set ANTHROPIC_API_KEY environment variable")
-        sys.exit(1)
+    print("Running eval using Claude Code CLI (pre-authenticated)...")
+    print(f"Agent model: {MODEL_AGENT} | Judge model: {MODEL_JUDGE}")
+    print(f"10 cases x 5 criteria = 50 checks + 10 responses = 60 CLI calls")
+    print("")
 
     results = run_eval(verbose=verbose)
 
